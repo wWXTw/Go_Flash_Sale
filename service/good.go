@@ -1,12 +1,11 @@
 package service
 
+// 处理与商品属性有关的服务
 import (
 	"FlashSale/model"
 	"FlashSale/pkg/e"
 	"FlashSale/serializer"
 )
-
-// 处理与商品属性有关的服务
 
 // 获取商品信息的函数
 func GetGoodInfo(gid int) serializer.Response {
