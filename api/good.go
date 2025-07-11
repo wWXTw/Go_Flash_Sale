@@ -9,9 +9,9 @@ import (
 )
 
 // 获取商品信息的API
-func GetGoodInfo(context *gin.Context) {
-	gid, _ := strconv.Atoi(context.Query("gid"))
+func GetGoodInfo(ctx *gin.Context) {
+	gid, _ := strconv.Atoi(ctx.Query("gid"))
 	result := service.GetGoodInfo(gid)
 	// 发送回前端
-	context.JSON(result.Status, result)
+	ctx.JSON(result.Status, result)
 }

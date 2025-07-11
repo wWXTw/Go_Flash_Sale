@@ -1,9 +1,39 @@
 package routers
 
-import "github.com/gin-gonic/gin"
+// 接收前端请求并分发给后端API
+import (
+	"FlashSale/api"
+
+	"github.com/gin-gonic/gin"
+)
 
 // ready to overhaul...
 func NewRouter() *gin.Engine {
 	var r = gin.Default()
+	r.StaticFile("/favicon.ico", "./static/favicon")
+
+	r.GET("/ping", func(ctx *gin.Context) {
+		ctx.JSON(200, gin.H{"msg": "pong"})
+	})
+
+	// 商品API入口
+	r.GET("/good", api.GetGoodInfo)
+
+	// 单机API入口
+	// 单机分组
+	LocalGroup := r.Group("/api/local")
+	{
+		LocalGroup.GET("/withoutlock", api.WithoutLock)
+	}
+
+	// 分布式API入口
+	// 分布式分组
+	DistributedGroup := r.Group("/api/distributed")
+	{
+		DistributedGroup.GET("/rush", func(ctx *gin.Context) {
+			ctx.JSON(200, gin.H{"msg": "success"})
+		})
+	}
+
 	return r
 }

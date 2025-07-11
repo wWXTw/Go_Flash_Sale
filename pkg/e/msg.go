@@ -1,5 +1,6 @@
 package e
 
+// 定义返回消息
 var MsgFlags = map[int]string{
 	SUCCESS:            "成功!",
 	NotExistIdentifier: "该第三方账号未绑定", // ???

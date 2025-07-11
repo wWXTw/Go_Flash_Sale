@@ -2,7 +2,11 @@ package model
 
 // 对有关秒杀的数据库进行操作(DAO)
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 // GoodCounts表结构
 type GoodCounts struct {
@@ -16,7 +20,7 @@ type GoodCounts struct {
 type GoodOrders struct {
 	GoodId   int64
 	UserId   int64
-	SoldTime time.Time `gorm:"autoUpdateTime"`
+	SoldTime time.Time `gorm:"autoCreateTime;autoUpdateTime"`
 }
 
 // 查询商品数量
@@ -27,37 +31,37 @@ func GetCountByGoodsId(gid int) (int64, error) {
 }
 
 // 重置商品数量与版本
-func ResetCountByGoodsId(gid int) error {
-	return DB.Model(&GoodCounts{}).Where("goods_id=?", gid).Updates(map[string]interface{}{
+func ResetCountByGoodsId(tx *gorm.DB, gid int) error {
+	return tx.Model(&GoodCounts{}).Where("goods_id=?", gid).Updates(map[string]interface{}{
 		"counts":  40,
 		"version": 0,
 	}).Error
 }
 
 // 减少商品为指定数量
-func ReduceCountByGoodsId(gid int, newCount int64) error {
-	return DB.Model(&GoodCounts{}).Where("goods_id=?", gid).Update("counts", newCount).Error
+func ReduceCountByGoodsId(tx *gorm.DB, gid int, newCount int64) error {
+	return tx.Model(&GoodCounts{}).Where("goods_id=?", gid).Update("counts", newCount).Error
 }
 
 // 减少一个商品数量
-func ReduceOneByGoodsId(gid int) error {
+func ReduceOneByGoodsId(tx *gorm.DB, gid int) error {
 	var counts int64
-	err := DB.Model(&GoodCounts{}).Select("counts").Where("goods_id=?", gid).Scan(&counts).Error
+	err := tx.Model(&GoodCounts{}).Select("counts").Where("goods_id=?", gid).Scan(&counts).Error
 	if counts <= 0 || err != nil {
 		return err
 	}
-	err = DB.Model(&GoodCounts{}).Where("goods_id=?", gid).Update("counts", counts-1).Error
+	err = tx.Model(&GoodCounts{}).Where("goods_id=?", gid).Update("counts", counts-1).Error
 	return err
 }
 
 // 添加订单
-func AddOrder(order GoodOrders) error {
-	return DB.Model(&GoodOrders{}).Create(&order).Error
+func AddOrder(tx *gorm.DB, order GoodOrders) error {
+	return tx.Model(&GoodOrders{}).Create(&order).Error
 }
 
 // 清空商品订单
-func ClearOrderByGoodsId(gid int) error {
-	return DB.Where("goods_id", gid).Delete(&GoodOrders{}).Error
+func ClearOrderByGoodsId(tx *gorm.DB, gid int) error {
+	return tx.Where("goods_id", gid).Delete(&GoodOrders{}).Error
 }
 
 // 获取商品订单数

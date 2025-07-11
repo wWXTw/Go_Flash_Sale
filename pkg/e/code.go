@@ -1,6 +1,6 @@
 package e
 
-// 定义不同情况对应的int值
+// 定义返回值
 const (
 	SUCCESS            = 200
 	NotExistIdentifier = 202
