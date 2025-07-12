@@ -23,7 +23,8 @@ func NewRouter() *gin.Engine {
 	// 单机分组
 	LocalGroup := r.Group("/api/local")
 	{
-		LocalGroup.GET("/withoutlock", api.WithoutLock)
+		LocalGroup.GET("/without-lock", api.WithoutLock)
+		LocalGroup.GET("/with-lock", api.WithLock)
 	}
 
 	// 分布式API入口

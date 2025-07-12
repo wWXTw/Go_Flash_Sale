@@ -16,3 +16,11 @@ func WithoutLock(ctx *gin.Context) {
 	resp := service.WithoutLockService(gid)
 	ctx.JSON(resp.Status, resp)
 }
+
+// 加锁的情况
+func WithLock(ctx *gin.Context) {
+	var gid int
+	gid, _ = strconv.Atoi(ctx.Query("gid"))
+	resp := service.WithLockService(gid)
+	ctx.JSON(resp.Status, resp)
+}

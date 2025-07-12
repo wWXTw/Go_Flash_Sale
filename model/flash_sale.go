@@ -24,10 +24,17 @@ type GoodOrders struct {
 }
 
 // 查询商品数量
-func GetCountByGoodsId(gid int) (int64, error) {
-	var gc int64
+func GetCountByGoodsId(gid int) (int, error) {
+	var gc int
 	err := DB.Model(&GoodCounts{}).Select("count").Where("goods_id=?", gid).Scan(&gc).Error
 	return gc, err
+}
+
+// 查询商品
+func GetGoodByGoodId(gid int) (GoodCounts, error) {
+	var good GoodCounts
+	err := DB.Model(&GoodCounts{}).Where("goods_id=?", gid).First(&good).Error
+	return good, err
 }
 
 // 重置商品数量与版本
@@ -69,4 +76,37 @@ func GetOrdersCountById(gid int) (int64, error) {
 	var counts int64
 	err := DB.Model(&GoodOrders{}).Where("goods_id", gid).Count(&counts).Error
 	return counts, err
+}
+
+// 悲观锁读锁查询商品数量
+func PccReadGetCountByGoodId(tx *gorm.DB, gid int) (int, error) {
+	var gc int
+	// 设置悲观读锁
+	err := tx.Model(&GoodCounts{}).Set("gorm:query_option", "FOR UPDATE").Select("count").Where("goods_id=?", gid).Scan(&gc).Error
+	return gc, err
+}
+
+// 悲观锁写锁更新商品数量
+func PccWriteReduceOneByGoodsId(tx *gorm.DB, gid int) (int, error) {
+	counts := 0
+	// SQL原子化操作(本质上用到了行级锁,悲观锁的核心)
+	sqlStr := `UPDATE GoodCounts SET counts = counts - 1 where counts > 0 AND goods_id = ?`
+	res := tx.Exec(sqlStr, gid)
+	if err := res.Error; err != nil {
+		return counts, err
+	}
+	counts = int(res.RowsAffected)
+	return counts, nil
+}
+
+// 乐观锁情况下更新商品数量
+func OccReduceOneByGoodsID(tx *gorm.DB, gid int, need int, version int) (int, error) {
+	counts := 0
+	sqlStr := `UPDATE GoodCounts SET counts = counts - ?, version = version + 1 WHERE version = ? AND goods_id = ?`
+	res := tx.Exec(sqlStr, need, version, gid)
+	if err := res.Error; err != nil {
+		return counts, err
+	}
+	counts = int(res.RowsAffected)
+	return counts, nil
 }
