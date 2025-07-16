@@ -9,5 +9,6 @@ import (
 func main() {
 	config.Init()
 	r := routers.NewRouter()
+	println("启动监听端口：", config.HttpPort)
 	_ = r.Run(config.HttpPort)
 }

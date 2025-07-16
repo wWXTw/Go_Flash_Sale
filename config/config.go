@@ -3,12 +3,11 @@ package config
 import (
 	"FlashSale/model"
 	"fmt"
-	"strings"
 
 	"gopkg.in/ini.v1"
 )
 
-// 配置服务器与MySql数据库
+// 配置服务器与MySql数据库与其他配置
 var (
 	AppMode  string
 	HttpPort string
@@ -19,6 +18,8 @@ var (
 	DbUser     string
 	DbPassWord string
 	DbName     string
+
+	MaxRetry int
 )
 
 // 初始化函数
@@ -31,10 +32,18 @@ func Init() {
 	LoadServer(file)
 	LoadMysql(file)
 	// 拼接DSN
-	dsn := strings.Join([]string{
-		DbUser, ":", DbPassWord, "@tcp(", DbHost, ":", DbPort, ")/", DbName, "?charset=utf8mb4&parseTime=True"}, "")
+	dsn := fmt.Sprintf(
+		"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+		DbUser,
+		DbPassWord,
+		DbHost,
+		DbPort,
+		DbName,
+	)
 	// 开启数据库
 	model.DataBase(dsn)
+	// 配置其他参数
+	MaxRetry = 30
 }
 
 // 读取服务器参数的函数
@@ -47,8 +56,8 @@ func LoadServer(file *ini.File) {
 func LoadMysql(file *ini.File) {
 	Db = file.Section("mysql").Key("Db").String()
 	DbHost = file.Section("mysql").Key("DbHost").String()
-	DbPort = file.Section("mysql").Key("DbHost").String()
-	DbUser = file.Section("mysql").Key("DbHost").String()
-	DbPassWord = file.Section("mysql").Key("DbHost").String()
-	DbName = file.Section("mysql").Key("DbHost").String()
+	DbPort = file.Section("mysql").Key("DbPort").String()
+	DbUser = file.Section("mysql").Key("DbUser").String()
+	DbPassWord = file.Section("mysql").Key("DbPassWord").String()
+	DbName = file.Section("mysql").Key("DbName").String()
 }

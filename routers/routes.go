@@ -25,6 +25,10 @@ func NewRouter() *gin.Engine {
 	{
 		LocalGroup.GET("/without-lock", api.WithoutLock)
 		LocalGroup.GET("/with-lock", api.WithLock)
+		LocalGroup.GET("/pcc-read-lock", api.PccReadLock)
+		LocalGroup.GET("/pcc-write-lock", api.PccWriteLock)
+		LocalGroup.GET("/occ-lock", api.OccLock)
+		LocalGroup.GET("/channel", api.Channel)
 	}
 
 	// 分布式API入口

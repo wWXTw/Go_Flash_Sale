@@ -10,7 +10,7 @@ import (
 
 // GoodCounts表结构
 type GoodCounts struct {
-	GoodId         int64 `gorm:"primaryKey"`
+	GoodsId        int64 `gorm:"primaryKey"`
 	Counts         int64
 	LastUpdateTime time.Time `gorm:"autoUpdateTime"`
 	Version        int64
@@ -18,7 +18,7 @@ type GoodCounts struct {
 
 // GoodOrder表结构
 type GoodOrders struct {
-	GoodId   int64
+	GoodsId  int64
 	UserId   int64
 	SoldTime time.Time `gorm:"autoCreateTime;autoUpdateTime"`
 }
@@ -26,7 +26,7 @@ type GoodOrders struct {
 // 查询商品数量
 func GetCountByGoodsId(gid int) (int, error) {
 	var gc int
-	err := DB.Model(&GoodCounts{}).Select("count").Where("goods_id=?", gid).Scan(&gc).Error
+	err := DB.Model(&GoodCounts{}).Select("counts").Where("goods_id=?", gid).Scan(&gc).Error
 	return gc, err
 }
 
@@ -82,7 +82,8 @@ func GetOrdersCountById(gid int) (int64, error) {
 func PccReadGetCountByGoodId(tx *gorm.DB, gid int) (int, error) {
 	var gc int
 	// 设置悲观读锁
-	err := tx.Model(&GoodCounts{}).Set("gorm:query_option", "FOR UPDATE").Select("count").Where("goods_id=?", gid).Scan(&gc).Error
+	sql := `SELECT counts FROM good_counts WHERE goods_id = ? FOR UPDATE`
+	err := tx.Raw(sql, gid).Scan(&gc).Error
 	return gc, err
 }
 
@@ -90,7 +91,7 @@ func PccReadGetCountByGoodId(tx *gorm.DB, gid int) (int, error) {
 func PccWriteReduceOneByGoodsId(tx *gorm.DB, gid int) (int, error) {
 	counts := 0
 	// SQL原子化操作(本质上用到了行级锁,悲观锁的核心)
-	sqlStr := `UPDATE GoodCounts SET counts = counts - 1 where counts > 0 AND goods_id = ?`
+	sqlStr := `UPDATE good_counts SET counts = counts - 1 where counts > 0 AND goods_id = ?`
 	res := tx.Exec(sqlStr, gid)
 	if err := res.Error; err != nil {
 		return counts, err
@@ -102,7 +103,7 @@ func PccWriteReduceOneByGoodsId(tx *gorm.DB, gid int) (int, error) {
 // 乐观锁情况下更新商品数量
 func OccReduceOneByGoodsID(tx *gorm.DB, gid int, need int, version int) (int, error) {
 	counts := 0
-	sqlStr := `UPDATE GoodCounts SET counts = counts - ?, version = version + 1 WHERE version = ? AND goods_id = ?`
+	sqlStr := `UPDATE good_counts SET counts = counts - ?, version = version + 1 WHERE version = ? AND goods_id = ?`
 	res := tx.Exec(sqlStr, need, version, gid)
 	if err := res.Error; err != nil {
 		return counts, err

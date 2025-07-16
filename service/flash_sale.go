@@ -1,6 +1,7 @@
 package service
 
 import (
+	"FlashSale/config"
 	"FlashSale/model"
 	"FlashSale/pkg/e"
 	"FlashSale/serializer"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sync"
+	"time"
 )
 
 var wg sync.WaitGroup
@@ -51,15 +53,15 @@ func BuyGoodById(gid int, userid int) error {
 	}
 	if counts > 0 {
 		// 对商品数目减一
-		err = model.ResetCountByGoodsId(tx, int(counts-1))
+		err = model.ReduceCountByGoodsId(tx, gid, int64(counts-1))
 		if err != nil {
 			tx.Rollback()
 			return err
 		}
 		// 生成订单元组
 		var Order = model.GoodOrders{
-			GoodId: int64(gid),
-			UserId: int64(userid),
+			GoodsId: int64(gid),
+			UserId:  int64(userid),
 		}
 		err = model.AddOrder(tx, Order)
 		if err != nil {
@@ -84,7 +86,7 @@ func WithoutLockService(gid int) serializer.Response {
 		// 开启线程进行购买
 		go func(gid int) {
 			// 随机生成用户ID
-			userid := rand.Intn(100)
+			userid := i
 			err := BuyGoodById(gid, userid)
 			if err != nil {
 				fmt.Println("Error!", err.Error())
@@ -126,7 +128,7 @@ func WithLockService(gid int) serializer.Response {
 	// 开启购买线程
 	for i := 0; i < ProposedNum; i++ {
 		go func(gid int) {
-			userid := rand.Intn(100)
+			userid := i
 			// 购买商品时进行加锁
 			lock.Lock()
 			err := BuyGoodById(gid, userid)
@@ -178,15 +180,15 @@ func PccReadBuyGoodById(gid int, userid int) error {
 	}
 	if counts > 0 {
 		// 对商品数目减一
-		err = model.ResetCountByGoodsId(tx, int(counts-1))
+		err = model.ReduceCountByGoodsId(tx, gid, int64(counts-1))
 		if err != nil {
 			tx.Rollback()
 			return err
 		}
 		// 生成订单元组
 		var Order = model.GoodOrders{
-			GoodId: int64(gid),
-			UserId: int64(userid),
+			GoodsId: int64(gid),
+			UserId:  int64(userid),
 		}
 		err = model.AddOrder(tx, Order)
 		if err != nil {
@@ -208,7 +210,7 @@ func PccReadService(gid int) serializer.Response {
 	// 开启购买线程
 	for i := 0; i < ProposedNum; i++ {
 		go func(gid int) {
-			userid := rand.Intn(100)
+			userid := i
 			err := PccReadBuyGoodById(gid, userid)
 			if err != nil {
 				fmt.Println("Error!", err.Error())
@@ -251,8 +253,8 @@ func PccWriteBuyGoodById(gid int, userid int) error {
 	// 如果商品已被购买(counts > 0 -> rowAffected > 0)
 	if counts > 0 {
 		var Order = model.GoodOrders{
-			GoodId: int64(gid),
-			UserId: int64(userid),
+			GoodsId: int64(gid),
+			UserId:  int64(userid),
 		}
 		err = model.AddOrder(tx, Order)
 		if err != nil {
@@ -274,7 +276,7 @@ func PccWriteService(gid int) serializer.Response {
 	// 开启购买线程
 	for i := 0; i < ProposedNum; i++ {
 		go func(gid int) {
-			userid := rand.Intn(100)
+			userid := i
 			err := PccWriteBuyGoodById(gid, userid)
 			if err != nil {
 				fmt.Println("Error!", err.Error())
@@ -308,41 +310,50 @@ func PccWriteService(gid int) serializer.Response {
 
 // 乐观锁购买商品并创建订单
 func OccBuyGoodById(gid int, userid int, need int) error {
-	tx := model.DB.Begin()
-	good, err := model.GetGoodByGoodId(gid)
-	if err != nil {
-		return err
-	}
-	// 不加这个if判断语句乐观锁会一直重试下去
-	if good.Counts >= int64(need) {
-		// 版本控制,传入获取到商品信息的版本号
-		counts, err := model.OccReduceOneByGoodsID(tx, gid, need, int(good.Version))
+	for i := 0; i < config.MaxRetry; i++ {
+		tx := model.DB.Begin()
+		// 退避避免扎堆冲突
+		time.Sleep(time.Duration(rand.Intn(30)+1) * time.Millisecond)
+		good, err := model.GetGoodByGoodId(gid)
 		if err != nil {
-			// 版本老旧或者数据库问题,进行重试
-			// 重试体现在何处呢?
-			tx.Rollback()
 			return err
 		}
-		if counts > 0 {
-			// 购买成功添加订单
-			var Order = model.GoodOrders{
-				GoodId: int64(gid),
-				UserId: int64(userid),
-			}
-			err = model.AddOrder(tx, Order)
+		// 用if判断结束多余的重试
+		if good.Counts >= int64(need) {
+			// 版本控制,传入获取到商品信息的版本号
+			counts, err := model.OccReduceOneByGoodsID(tx, gid, need, int(good.Version))
 			if err != nil {
+				// 版本老旧或者数据库问题,进行重试
 				tx.Rollback()
-				return err
+				// 重试前退避
+				time.Sleep(time.Duration(rand.Intn(30)+1) * time.Millisecond)
+				continue
+			}
+			if counts > 0 {
+				// 购买成功添加订单
+				var Order = model.GoodOrders{
+					GoodsId: int64(gid),
+					UserId:  int64(userid),
+				}
+				err = model.AddOrder(tx, Order)
+				if err != nil {
+					tx.Rollback()
+					return err
+				}
+			} else {
+				tx.Rollback()
+				// 重试前退避
+				time.Sleep(time.Duration(rand.Intn(30)+1) * time.Millisecond)
+				continue
 			}
 		} else {
 			tx.Rollback()
+			return errors.New("内存已经不足")
 		}
-	} else {
-		tx.Rollback()
-		return errors.New("内存已经不足")
+		tx.Commit()
+		return nil
 	}
-	tx.Commit()
-	return nil
+	return errors.New("重试次数超时")
 }
 
 // 乐观锁购买商品的服务
@@ -355,7 +366,7 @@ func OccService(gid int) serializer.Response {
 	// 开启购买线程
 	for i := 0; i < ProposedNum; i++ {
 		go func(gid int) {
-			userid := rand.Intn(100)
+			userid := i
 			err := OccBuyGoodById(gid, userid, 1)
 			if err != nil {
 				fmt.Println("Error!", err.Error())
@@ -427,7 +438,7 @@ func ChannelService(gid int) serializer.Response {
 	// 开启购买线程
 	for i := 0; i < ProposedNum; i++ {
 		go func(gid int) {
-			userid := rand.Intn(100)
+			userid := i
 			err := ChannelSend(gid, userid)
 			if err != nil {
 				fmt.Println("Error!", err.Error())
