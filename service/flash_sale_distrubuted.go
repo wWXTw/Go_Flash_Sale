@@ -7,12 +7,15 @@ import (
 	"FlashSale/mq"
 	"FlashSale/pkg/e"
 	"FlashSale/serializer"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
 	"time"
+
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // 重置Redis数据库的函数
@@ -183,13 +186,182 @@ func WithMQService(gid int) serializer.Response {
 	ResetDataBase(gid)
 	ProposedNum := 50
 	wg.Add(ProposedNum)
-	// Redis数据库的初始化 ???
+	// Redis数据库的初始化
 	ResetRedis(gid)
 	// 开启购买线程
 	for i := 0; i < ProposedNum; i++ {
 		go func(gid int) {
 			userid := i
 			err := MQBuyGoodById(gid, userid)
+			if err != nil {
+				fmt.Println("Error!", err.Error())
+			} else {
+				fmt.Printf("处理完用户%d对商品%d的购买请求\n", userid, gid)
+			}
+			wg.Done()
+		}(gid)
+	}
+	wg.Wait()
+	// 获取成功订单数
+	SuccessOrder, err := model.GetOrdersCountById(gid)
+	if err != nil {
+		code = e.ERROR
+		return serializer.Response{
+			Status: code,
+			Data:   nil,
+			Msg:    e.GetMsg(code),
+			Error:  err.Error(),
+		}
+	}
+	fmt.Printf("一共完成了%d笔订单\n", SuccessOrder)
+	code = e.SUCCESS
+	return serializer.Response{
+		Status: code,
+		Data:   nil,
+		Msg:    e.GetMsg(code),
+		Error:  "",
+	}
+}
+
+// 定义ETCD锁结构
+type ETCDMutex struct {
+	Ttl     int64              // 锁有效时间
+	Conf    clientv3.Config    // 客户端连接配置
+	Key     string             // Key值
+	Cancel  context.CancelFunc // 取消续约的上下文函数
+	lease   clientv3.Lease     // ETCD的租借接口
+	leaseID clientv3.LeaseID   // 租约ID
+	txn     clientv3.Txn       // ETCD事务
+}
+
+// ETCD锁的构造函数
+func (em *ETCDMutex) Init() error {
+	// 创建一个ETCD客户端
+	client, err := clientv3.New(em.Conf)
+	if err != nil {
+		fmt.Println("初始化ETCD客户端失败")
+		return err
+	}
+	// 创建KV接口(key-value)的原子事务对象
+	em.txn = clientv3.NewKV(client).Txn(context.Background())
+	// 创建租约接口
+	em.lease = clientv3.NewLease(client)
+	// 申请一个固定ttl的租约
+	var leaseResp *clientv3.LeaseGrantResponse
+	leaseResp, err = em.lease.Grant(context.Background(), em.Ttl) // context.Background()类似于空,适合补足不重要context
+	if err != nil {
+		fmt.Println("申请租约失败")
+		return err
+	}
+	// 保存租约ID
+	em.leaseID = leaseResp.ID
+	// 创建取消函数
+	ctx, cancel := context.WithCancel(context.Background())
+	em.Cancel = cancel
+	// 开启自动续约 KeepAlive一直监听ctx的Done()信号,收到时则停止续约
+	_, err = em.lease.KeepAlive(ctx, em.leaseID)
+	if err != nil {
+		fmt.Println("ETCD开启自动续约失败")
+		return err
+	}
+	return nil
+}
+
+// ETCD锁的上锁函数
+func (em *ETCDMutex) Lock() (bool, error) {
+	// 初始化
+	err := em.Init()
+	if err != nil {
+		fmt.Println("ETCD锁初始化失败")
+		return false, err
+	}
+	// 设置原子加锁事务
+	// 如果在ETCD数据库中没找到以em.Key为键值的行则进行创建并绑定租约
+	em.txn.If(clientv3.Compare(clientv3.CreateRevision(em.Key), "=", 0)).
+		Then(clientv3.OpPut(em.Key, "", clientv3.WithLease(em.leaseID))).
+		Else()
+	// 执行事务
+	var txnResp *clientv3.TxnResponse
+	txnResp, err = em.txn.Commit()
+	if err != nil {
+		fmt.Println("ETCD事务执行失败")
+		return false, err
+	}
+	// 如果锁已被别人抢占
+	if !txnResp.Succeeded {
+		return false, nil
+	}
+	// 成功得到锁
+	return true, nil
+}
+
+// ETCD锁的解锁函数
+func (em *ETCDMutex) UnLock() error {
+	// 调用取消函数 发送ctx.Done()信号
+	em.Cancel()
+	// 释放租约 自动删除对应Key行
+	_, err := em.lease.Revoke(context.Background(), em.leaseID)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// 利用ETCD分布式锁购买商品
+func WithETCDBuyGoodById(gid int, userid int) error {
+	var conf = clientv3.Config{
+		Endpoints:   []string{"127.0.0.1:2379"},
+		DialTimeout: 5 * time.Second,
+	}
+	// 设置ETCD锁的配置
+	em := &ETCDMutex{
+		Key:  strconv.Itoa(gid),
+		Conf: conf,
+		Ttl:  10,
+	}
+	var locked bool
+	var err error
+	// 尝试上锁
+	for i := 0; i < config.MaxRetry; i++ {
+		locked, err = em.Lock()
+		if err != nil {
+			return err
+		}
+		// 抢到锁退出重试
+		if locked {
+			break
+		}
+		// 延迟一段时间后进行重试
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !locked {
+		return errors.New("ETCD锁无法抢到")
+	}
+	// 购买商品函数
+	err = BuyGoodById(gid, userid)
+	if err != nil {
+		return err
+	}
+	// 解锁
+	err = em.UnLock()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// 利用ETCD缓存分布式锁的服务
+func WithETCDService(gid int) serializer.Response {
+	// 初始化
+	var code int
+	ResetDataBase(gid)
+	ProposedNum := 50
+	wg.Add(ProposedNum)
+	// 开启购买线程
+	for i := 0; i < ProposedNum; i++ {
+		go func(gid int) {
+			userid := i
+			err := WithETCDBuyGoodById(gid, userid)
 			if err != nil {
 				fmt.Println("Error!", err.Error())
 			} else {

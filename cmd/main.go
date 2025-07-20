@@ -13,6 +13,8 @@ func main() {
 	config.Init()
 	// 初始化Redis
 	cache.InitRedis()
+	// 初始化ETCD
+	cache.InitETCD()
 	// 初始化RabbitMQ
 	mq.InitRabbitMQ()
 	// 初始化MQ消费者

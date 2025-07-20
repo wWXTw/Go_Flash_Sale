@@ -7,7 +7,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ready to overhaul...
 func NewRouter() *gin.Engine {
 	var r = gin.Default()
 	r.StaticFile("/favicon.ico", "./static/favicon")
@@ -40,6 +39,7 @@ func NewRouter() *gin.Engine {
 		})
 		DistributedGroup.GET("/with-redis-lock", api.WithRedisLock)
 		DistributedGroup.GET("/with-mq", api.WithMQ)
+		DistributedGroup.GET("/with-etcd", api.WithETCD)
 	}
 
 	return r

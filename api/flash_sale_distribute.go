@@ -20,3 +20,10 @@ func WithMQ(ctx *gin.Context) {
 	resp := service.WithMQService(gid)
 	ctx.JSON(resp.Status, resp)
 }
+
+// 使用ETCD缓存分布式锁的情况
+func WithETCD(ctx *gin.Context) {
+	gid, _ := strconv.Atoi(ctx.Query("gid"))
+	resp := service.WithETCDService(gid)
+	ctx.JSON(resp.Status, resp)
+}
