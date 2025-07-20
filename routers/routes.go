@@ -38,6 +38,8 @@ func NewRouter() *gin.Engine {
 		DistributedGroup.GET("/rush", func(ctx *gin.Context) {
 			ctx.JSON(200, gin.H{"msg": "success"})
 		})
+		DistributedGroup.GET("/with-redis-lock", api.WithRedisLock)
+		DistributedGroup.GET("/with-mq", api.WithMQ)
 	}
 
 	return r

@@ -348,7 +348,7 @@ func OccBuyGoodById(gid int, userid int, need int) error {
 			}
 		} else {
 			tx.Rollback()
-			return errors.New("内存已经不足")
+			return errors.New("库存已经不足")
 		}
 		tx.Commit()
 		return nil

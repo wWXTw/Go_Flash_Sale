@@ -4,6 +4,7 @@ import (
 	"FlashSale/cache"
 	"FlashSale/config"
 	"FlashSale/model"
+	"FlashSale/mq"
 	"FlashSale/pkg/e"
 	"FlashSale/serializer"
 	"crypto/rand"
@@ -14,7 +15,13 @@ import (
 	"time"
 )
 
-// 可考虑多实例
+// 重置Redis数据库的函数
+func ResetRedis(gid int) {
+	// 设置测试key对应的值为40,过期时间为永不
+	cache.RedisClient.Set(strconv.Itoa(gid), 40, 0)
+}
+
+// 优化: 可考虑多实例
 // 获取UUID的函数
 func GetUuid(gidStr string) string {
 	// 获取时间戳
@@ -100,7 +107,7 @@ func RedisLockBuyGoodById(gid int, userid int) error {
 }
 
 // 利用Redis分布式锁购买商品的服务
-func WithRedisLock(gid int) serializer.Response {
+func WithRedisLockService(gid int) serializer.Response {
 	// 初始化
 	var code int
 	ResetDataBase(gid)
@@ -111,6 +118,78 @@ func WithRedisLock(gid int) serializer.Response {
 		go func(gid int) {
 			userid := i
 			err := RedisLockBuyGoodById(gid, userid)
+			if err != nil {
+				fmt.Println("Error!", err.Error())
+			} else {
+				fmt.Printf("处理完用户%d对商品%d的购买请求\n", userid, gid)
+			}
+			wg.Done()
+		}(gid)
+	}
+	wg.Wait()
+	// 获取成功订单数
+	SuccessOrder, err := model.GetOrdersCountById(gid)
+	if err != nil {
+		code = e.ERROR
+		return serializer.Response{
+			Status: code,
+			Data:   nil,
+			Msg:    e.GetMsg(code),
+			Error:  err.Error(),
+		}
+	}
+	fmt.Printf("一共完成了%d笔订单\n", SuccessOrder)
+	code = e.SUCCESS
+	return serializer.Response{
+		Status: code,
+		Data:   nil,
+		Msg:    e.GetMsg(code),
+		Error:  "",
+	}
+}
+
+// MQ+Redis原子化+异步落库购买商品
+func MQBuyGoodById(gid int, userid int) error {
+	gidStr := strconv.Itoa(gid)
+	// 利用Redis原子化操作减去库存
+	counts, err := cache.RedisClient.Decr(gidStr).Result()
+	if err != nil {
+		return err
+	}
+	// 剩余量如果小于0则进行回滚
+	if counts < 0 {
+		cache.RedisClient.Incr(gidStr)
+		return errors.New("库存已经不足")
+	}
+	// 库存正常则通过MQ生产者向消费者发送消息
+	msg := model.OrderMsg{
+		Gid: gid,
+		Uid: userid,
+	}
+	err = mq.PulishOrderMsg(msg)
+	if err != nil {
+		// 回滚库存
+		cache.RedisClient.Incr(gidStr)
+		fmt.Println("消息发送失败")
+		return err
+	}
+	return nil
+}
+
+// 利用MQ与Redis原子化操作+异步落库的服务
+func WithMQService(gid int) serializer.Response {
+	// 初始化
+	var code int
+	ResetDataBase(gid)
+	ProposedNum := 50
+	wg.Add(ProposedNum)
+	// Redis数据库的初始化 ???
+	ResetRedis(gid)
+	// 开启购买线程
+	for i := 0; i < ProposedNum; i++ {
+		go func(gid int) {
+			userid := i
+			err := MQBuyGoodById(gid, userid)
 			if err != nil {
 				fmt.Println("Error!", err.Error())
 			} else {
