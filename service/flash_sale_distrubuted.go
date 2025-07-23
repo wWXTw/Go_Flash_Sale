@@ -21,7 +21,7 @@ import (
 // 重置Redis数据库的函数
 func ResetRedis(gid int) {
 	// 设置测试key对应的值为40,过期时间为永不
-	cache.RedisClient.Set(strconv.Itoa(gid), 40, 0)
+	cache.RedisClusterClient.Set(cache.RedisCtx, strconv.Itoa(gid), 40, 0)
 }
 
 // 优化: 可考虑多实例
@@ -52,9 +52,9 @@ func SetWatchDog(key, uuid string, interval, ttl time.Duration, stopChan <-chan 
 		// 如果是从ticker.C收到了信号
 		case <-ticker.C:
 			// 对锁进行续期
-			val, err := cache.RedisClient.Get(key).Result()
+			val, err := cache.RedisClusterClient.Get(cache.RedisCtx, key).Result()
 			if err == nil && val == uuid {
-				cache.RedisClient.Expire(key, ttl)
+				cache.RedisClusterClient.Expire(cache.RedisCtx, key, ttl)
 			}
 		// 如果是从stopChan收到了信号 (var a = <-stopChan)
 		case <-stopChan:
@@ -70,7 +70,7 @@ func RedisLockBuyGoodById(gid int, userid int) error {
 	var hasLock bool
 	var err error
 	for i := 0; i < config.MaxRetry; i++ {
-		hasLock, err = cache.RedisClient.SetNX(gidStr, Uuid, 3*time.Second).Result()
+		hasLock, err = cache.RedisClusterClient.SetNX(cache.RedisCtx, gidStr, Uuid, 3*time.Second).Result()
 		if err != nil {
 			return errors.New("获取Redis锁出错")
 		} else if hasLock {
@@ -101,7 +101,7 @@ func RedisLockBuyGoodById(gid int, userid int) error {
    	 return 0
 	end
 	`
-	_, err = cache.RedisClient.Eval(luaScript, []string{gidStr}, Uuid).Result()
+	_, err = cache.RedisClusterClient.Eval(cache.RedisCtx, luaScript, []string{gidStr}, Uuid).Result()
 	if err != nil {
 		fmt.Println("Redis解锁失败")
 		return err
@@ -155,13 +155,13 @@ func WithRedisLockService(gid int) serializer.Response {
 func MQBuyGoodById(gid int, userid int) error {
 	gidStr := strconv.Itoa(gid)
 	// 利用Redis原子化操作减去库存
-	counts, err := cache.RedisClient.Decr(gidStr).Result()
+	counts, err := cache.RedisClusterClient.Decr(cache.RedisCtx, gidStr).Result()
 	if err != nil {
 		return err
 	}
 	// 剩余量如果小于0则进行回滚
 	if counts < 0 {
-		cache.RedisClient.Incr(gidStr)
+		cache.RedisClusterClient.Incr(cache.RedisCtx, gidStr)
 		return errors.New("库存已经不足")
 	}
 	// 库存正常则通过MQ生产者向消费者发送消息
@@ -172,7 +172,7 @@ func MQBuyGoodById(gid int, userid int) error {
 	err = mq.PulishOrderMsg(msg)
 	if err != nil {
 		// 回滚库存
-		cache.RedisClient.Incr(gidStr)
+		cache.RedisClusterClient.Incr(cache.RedisCtx, gidStr)
 		fmt.Println("消息发送失败")
 		return err
 	}

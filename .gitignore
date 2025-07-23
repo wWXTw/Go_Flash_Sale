@@ -1,0 +1,4 @@
+redis-cluster/*/data/
+redis-cluster/*/*.rdb
+redis-cluster/*/*.aof
+redis-cluster/*/*.log
